@@ -1,5 +1,5 @@
 ---
-title: "R2 Object Tools: CRUD Operations via MCP"
+title: "R2 Object Tools: Ten CRUD Operations for MCP Clients"
 sidebarTitle: "Object Tools"
 description: "Ten always-enabled MCP tools covering list, head, get, put, conditional write, delete, copy, move, and rename operations on the bound R2 bucket."
 ---
@@ -151,7 +151,7 @@ Delete one R2 object under the configured root prefix. This operation is idempot
   The relative object key to delete.
 </ParamField>
 
-<ParamField query="confirm" type="boolean" required>
+<ParamField query="confirm" type="true" required>
   Must be `true`. This literal guard prevents accidental deletion.
 </ParamField>
 
@@ -172,7 +172,7 @@ Delete multiple R2 objects in a single call. Supply `dryRun: true` to preview th
   Array of relative object keys to delete. Must contain at least one key and no more than `MAX_LIST_LIMIT` keys (default 100).
 </ParamField>
 
-<ParamField query="confirm" type="boolean" required>
+<ParamField query="confirm" type="true" required>
   Must be `true`.
 </ParamField>
 
@@ -240,7 +240,7 @@ Move one R2 object to a different key. Implemented as `r2_object_copy` followed 
   The relative key to move the object to.
 </ParamField>
 
-<ParamField query="confirm" type="boolean" required>
+<ParamField query="confirm" type="true" required>
   Must be `true`.
 </ParamField>
 
@@ -287,7 +287,7 @@ Move an object to a new basename within its current prefix, or into an explicit 
   The new basename for the object (minimum 1 character). Must not contain `/` or `\`.
 </ParamField>
 
-<ParamField query="confirm" type="boolean" required>
+<ParamField query="confirm" type="true" required>
   Must be `true`.
 </ParamField>
 

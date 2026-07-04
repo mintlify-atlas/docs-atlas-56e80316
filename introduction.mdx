@@ -1,7 +1,7 @@
 ---
 title: "Cloudflare R2 Remote MCP Worker: Object Storage for AI"
 sidebarTitle: "Introduction"
-description: "A remote MCP server that exposes Cloudflare R2 object storage operations to AI clients like ChatGPT, secured with GitHub OAuth and running on Cloudflare Workers."
+description: "A remote MCP server that exposes Cloudflare R2 object storage to AI clients like ChatGPT, secured with GitHub OAuth on Cloudflare Workers."
 ---
 
 The Cloudflare R2 Remote MCP Worker turns a Cloudflare Worker into a remote [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server, giving AI clients direct, authenticated access to R2 object storage. Instead of manually uploading files or scripting API calls, you can ask an MCP-capable client—such as ChatGPT with a custom connector—to list, read, upload, copy, or delete objects in your R2 bucket. The Worker handles GitHub OAuth, routes MCP traffic, and enforces configurable safety guards, so your storage is accessible to AI tools without being left open to the public internet.

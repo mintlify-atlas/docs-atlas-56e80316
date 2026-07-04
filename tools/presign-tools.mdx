@@ -1,5 +1,5 @@
 ---
-title: "Presigned URL Tools for Direct R2 Access"
+title: "Presigned URL Tools for Temporary Direct R2 Access"
 sidebarTitle: "Presign Tools"
 description: "Enable optional presigned URL tools to generate temporary S3-compatible GET and PUT URLs, with required R2 credentials and key security considerations."
 ---
@@ -53,7 +53,7 @@ Presigned URLs are the right tool in three situations:
 
 ### r2_presign_get
 
-Creates a temporary presigned GET URL for a single R2 object. The returned URL can be used by any HTTP client to download the object directly from R2 until the URL expires. No Worker involvement is required for the actual download.
+Create a presigned GET URL for one R2 object. The returned URL can be used by any HTTP client to download the object directly from R2 until the URL expires. No Worker involvement is required for the actual download.
 
 <ParamField body="key" type="string" required>
   The object key to generate a download URL for. If `R2_ROOT_PREFIX` is configured, the key is resolved relative to that prefix.
@@ -78,7 +78,7 @@ Creates a temporary presigned GET URL for a single R2 object. The returned URL c
 
 ### r2_presign_put
 
-Creates a temporary presigned PUT URL for a single R2 object. Clients can use the URL to upload an object directly to R2 with a standard HTTP `PUT` request. The Worker is not involved in the upload itself.
+Create a presigned PUT URL for one R2 object. Clients can use the URL to upload an object directly to R2 with a standard HTTP `PUT` request. The Worker is not involved in the upload itself.
 
 <ParamField body="key" type="string" required>
   The object key to generate an upload URL for. Resolved relative to `R2_ROOT_PREFIX` if configured.

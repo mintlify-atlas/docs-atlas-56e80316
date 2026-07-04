@@ -1,5 +1,5 @@
 ---
-title: "Read-Only Admin Tools for R2 Account Data"
+title: "Read-Only Admin Tools for R2 Bucket and Account Data"
 sidebarTitle: "Admin Tools"
 description: "Enable 10 read-only account tools that surface R2 bucket metadata, CORS, lifecycle, domains, notifications, and storage metrics using a scoped API token."
 ---
@@ -38,16 +38,16 @@ Every admin tool carries `readOnlyHint: true` in its MCP annotations, signalling
 
 | Tool | Description |
 |---|---|
-| `r2_bucket_list` | List R2 buckets in the account |
-| `r2_bucket_get` | Get metadata for one bucket |
-| `r2_cors_get` | Get CORS rules for one bucket |
-| `r2_lifecycle_get` | Get lifecycle rules for one bucket |
-| `r2_domain_custom_list` | List custom domains for one bucket |
-| `r2_domain_custom_get` | Get custom domain settings for one bucket and domain |
-| `r2_domain_managed_get` | Get r2.dev managed domain settings for one bucket |
-| `r2_notifications_list` | List event notification rules for one bucket |
-| `r2_notifications_get` | Get one event notification queue configuration |
-| `r2_metrics_get` | Get account-level R2 storage metrics |
+| `r2_bucket_list` | List R2 buckets in the configured Cloudflare account. |
+| `r2_bucket_get` | Get metadata for one R2 bucket. |
+| `r2_cors_get` | Get CORS rules for one R2 bucket. |
+| `r2_lifecycle_get` | Get lifecycle rules for one R2 bucket. |
+| `r2_domain_custom_list` | List custom domains attached to one R2 bucket. |
+| `r2_domain_custom_get` | Get custom domain settings for one R2 bucket. |
+| `r2_domain_managed_get` | Get r2.dev managed domain settings for one R2 bucket. |
+| `r2_notifications_list` | List event notification rules for one R2 bucket. |
+| `r2_notifications_get` | Get one event notification queue configuration for an R2 bucket. |
+| `r2_metrics_get` | Get account-level R2 storage metrics. |
 
 ---
 
@@ -55,7 +55,7 @@ Every admin tool carries `readOnlyHint: true` in its MCP annotations, signalling
 
 ### r2_bucket_list
 
-Lists all R2 buckets in the configured Cloudflare account. Supports pagination and server-side filtering by name.
+List R2 buckets in the configured Cloudflare account. Supports pagination and server-side filtering by name.
 
 <ParamField body="cursor" type="string">
   Pagination cursor returned by a previous `r2_bucket_list` response. Omit for the first page.
@@ -87,7 +87,7 @@ Lists all R2 buckets in the configured Cloudflare account. Supports pagination a
 
 ### r2_bucket_get
 
-Returns metadata for a single R2 bucket, including creation time and location hint.
+Get metadata for one R2 bucket, including creation time and location hint.
 
 <ParamField body="bucketName" type="string">
   Name of the bucket to inspect. Defaults to the value of `R2_BUCKET_NAME` when omitted.
@@ -105,7 +105,7 @@ Returns metadata for a single R2 bucket, including creation time and location hi
 
 ### r2_cors_get
 
-Returns the CORS rules currently configured on a bucket. Useful for verifying that browser-origin restrictions are set correctly before enabling presigned URL flows.
+Get CORS rules for one R2 bucket. Useful for verifying that browser-origin restrictions are set correctly before enabling presigned URL flows.
 
 <ParamField body="bucketName" type="string">
   Name of the target bucket. Defaults to `R2_BUCKET_NAME` when omitted.
@@ -123,7 +123,7 @@ Returns the CORS rules currently configured on a bucket. Useful for verifying th
 
 ### r2_lifecycle_get
 
-Returns the object lifecycle rules for a bucket, including expiration and transition policies.
+Get lifecycle rules for one R2 bucket, including expiration and transition policies.
 
 <ParamField body="bucketName" type="string">
   Name of the target bucket. Defaults to `R2_BUCKET_NAME` when omitted.
@@ -133,7 +133,7 @@ Returns the object lifecycle rules for a bucket, including expiration and transi
 
 ### r2_domain_custom_list
 
-Lists all custom domains attached to a bucket.
+List custom domains attached to one R2 bucket.
 
 <ParamField body="bucketName" type="string">
   Name of the target bucket. Defaults to `R2_BUCKET_NAME` when omitted.
@@ -143,7 +143,7 @@ Lists all custom domains attached to a bucket.
 
 ### r2_domain_custom_get
 
-Returns the settings for one specific custom domain attached to a bucket.
+Get custom domain settings for one R2 bucket. Returns the configuration for a specific custom domain attached to the bucket.
 
 <ParamField body="bucketName" type="string">
   Name of the target bucket. Defaults to `R2_BUCKET_NAME` when omitted.
@@ -166,7 +166,7 @@ Returns the settings for one specific custom domain attached to a bucket.
 
 ### r2_domain_managed_get
 
-Returns the r2.dev managed subdomain settings for a bucket, including whether public access is enabled.
+Get r2.dev managed domain settings for one R2 bucket, including whether public access is enabled.
 
 <ParamField body="bucketName" type="string">
   Name of the target bucket. Defaults to `R2_BUCKET_NAME` when omitted.
@@ -176,7 +176,7 @@ Returns the r2.dev managed subdomain settings for a bucket, including whether pu
 
 ### r2_notifications_list
 
-Lists all event notification rules configured on a bucket. Each rule maps bucket events (such as object creation or deletion) to a Cloudflare Queue.
+List event notification rules for one R2 bucket. Each rule maps bucket events (such as object creation or deletion) to a Cloudflare Queue.
 
 <ParamField body="bucketName" type="string">
   Name of the target bucket. Defaults to `R2_BUCKET_NAME` when omitted.
@@ -186,7 +186,7 @@ Lists all event notification rules configured on a bucket. Each rule maps bucket
 
 ### r2_notifications_get
 
-Returns the full configuration for one event notification queue associated with a bucket.
+Get one event notification queue configuration for an R2 bucket. Returns the full configuration for the specified queue.
 
 <ParamField body="bucketName" type="string">
   Name of the target bucket. Defaults to `R2_BUCKET_NAME` when omitted.
@@ -209,7 +209,7 @@ Returns the full configuration for one event notification queue associated with 
 
 ### r2_metrics_get
 
-Returns account-level R2 storage metrics, including total object count and storage bytes consumed across all buckets in the account.
+Get account-level R2 storage metrics, including total object count and storage bytes consumed across all buckets in the account.
 
 This tool takes no parameters.
 
