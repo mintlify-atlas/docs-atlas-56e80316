@@ -1,0 +1,105 @@
+---
+title: "Set Up ChatGPT to Access Your Cloudflare R2 Bucket via MCP"
+sidebarTitle: "ChatGPT"
+description: "Add the deployed R2 Worker as a custom ChatGPT MCP connector, complete GitHub OAuth authorization, and invoke R2 tools in conversation."
+---
+
+ChatGPT supports remote MCP connectors that call external tools over streamable HTTP. By adding this Worker as a custom connector, ChatGPT can list bucket contents, upload and download objects, copy, move, rename, and delete files — all from within a conversation. The connector authenticates using GitHub OAuth, so only GitHub accounts listed in `ALLOWED_GITHUB_LOGINS` can use the tools.
+
+## Prerequisites
+
+Before setting up the ChatGPT connector, make sure:
+
+- The Worker is deployed and reachable at `https://<worker-url>/mcp`.
+- `AUTH_MODE=github` is set in your Worker configuration.
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `COOKIE_ENCRYPTION_KEY` are configured as Worker secrets.
+- The GitHub OAuth App's callback URL is set to `https://<worker-url>/callback`.
+- Your GitHub login is listed in `ALLOWED_GITHUB_LOGINS`.
+
+## Required Values
+
+Have these values ready when creating the connector:
+
+```text
+URL  = https://<worker-url>/mcp
+Auth = OAuth
+```
+
+## Setup Steps
+
+<Steps>
+  <Step title="Open ChatGPT settings">
+    Log in to [chat.openai.com](https://chat.openai.com) and open your account settings. The settings panel is typically accessible from the menu in the bottom-left corner of the chat interface.
+  </Step>
+
+  <Step title="Navigate to Connectors or Apps & Connectors">
+    Inside settings, look for a section labelled **Connectors**, **Apps**, or **Apps & Connectors**. The exact label depends on the ChatGPT plan and interface version.
+  </Step>
+
+  <Step title="Enable Developer Mode if required">
+    Custom MCP connectors require **Developer Mode** to be active. If you do not see an option to add a custom connector, enable Developer Mode first.
+
+    <Note>
+      Developer Mode unlocks full MCP connector support in ChatGPT. See the official references for details:
+      - [ChatGPT Developer Mode overview](https://platform.openai.com/docs/developer-mode)
+      - [Developer Mode, apps, and full MCP connectors in ChatGPT (Beta)](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt-beta)
+    </Note>
+  </Step>
+
+  <Step title="Create or add a custom connector">
+    Click **Add connector**, **New connector**, or the equivalent button to open the connector creation form.
+  </Step>
+
+  <Step title="Choose MCP or remote MCP connector type">
+    When prompted for the connector type, select **MCP** or **Remote MCP**. This tells ChatGPT to use the streamable HTTP protocol rather than a built-in plugin integration.
+  </Step>
+
+  <Step title="Set the connector URL">
+    In the URL field, enter your Worker's MCP endpoint:
+
+    ```text
+    https://<worker-url>/mcp
+    ```
+
+    Replace `<worker-url>` with your actual deployed Worker hostname.
+  </Step>
+
+  <Step title="Choose OAuth authentication">
+    Set the authentication method to **OAuth**. ChatGPT will use the OAuth routes exposed by the Worker (`/authorize`, `/token`, `/register`, `/callback`) to complete the login flow automatically.
+  </Step>
+
+  <Step title="Save or create the connector">
+    Click **Save**, **Create**, or the equivalent confirmation button to register the connector.
+  </Step>
+
+  <Step title="Start the connection flow">
+    After saving, initiate the connection. ChatGPT will open a browser popup or redirect to begin the OAuth authorization flow.
+  </Step>
+
+  <Step title="Approve the GitHub OAuth login">
+    The Worker will redirect you to GitHub to authorize the OAuth App. Log in with the GitHub account that appears in your `ALLOWED_GITHUB_LOGINS` list. Approving with any other account will result in an access-denied error after login.
+  </Step>
+
+  <Step title="Refresh or list actions and tools">
+    Once authorization completes, return to ChatGPT and refresh the connector or the tool/action list. The R2 tools should now appear and be available to invoke in conversation.
+  </Step>
+</Steps>
+
+## Using the Tools
+
+After the connector is active, you can ask ChatGPT to interact with your R2 bucket directly in conversation — for example: *"List the objects in my bucket"* or *"Upload this text as notes.txt"*.
+
+<Note>
+  Write and modify tools — such as `r2_object_put`, `r2_object_delete`, `r2_object_move`, and others that mutate state — may require an explicit confirmation step before ChatGPT executes them. Review the proposed action before approving.
+</Note>
+
+## Troubleshooting
+
+- **Tools do not appear after connecting** — refresh the tool or action definitions inside the connector settings. ChatGPT caches the tool list and may not pick up changes automatically.
+- **OAuth popup closes without completing** — check that the GitHub OAuth App callback URL matches `https://<worker-url>/callback` exactly.
+- **Tools appear but calls fail** — verify the Worker is deployed and that `/healthz` returns `{ "ok": true, "bucketAccessible": true }`.
+
+## Related Pages
+
+- [Generic client connection guide](/clients/connecting) — endpoint reference and troubleshooting that applies to all MCP clients.
+- [Tools overview](/tools/overview) — descriptions and parameter reference for every tool exposed by the Worker.

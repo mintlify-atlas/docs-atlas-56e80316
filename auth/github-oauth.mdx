@@ -1,0 +1,174 @@
+---
+title: "Set Up GitHub OAuth for the MCP Worker"
+sidebarTitle: "GitHub OAuth"
+description: "Create a GitHub OAuth App, provision the KV namespace, set required secrets, and configure the login allowlist for your Worker deployment."
+---
+
+Before the Worker can authenticate MCP clients, you need a GitHub OAuth App to issue authorization codes, a Cloudflare KV namespace to store OAuth state, and three secrets deployed via Wrangler. This page walks through each step in order.
+
+<Note>
+  Use a **GitHub OAuth App** — not a GitHub App and not a personal access token. GitHub Apps rely on installation IDs, private keys, and repository-scoped permissions, which are not the authentication model used here. A personal access token cannot serve as an OAuth provider. The OAuth App is the only supported option.
+</Note>
+
+<Steps>
+
+  <Step title="Create a GitHub OAuth App">
+    Navigate to your GitHub account settings and open the OAuth Apps section:
+
+    ```text
+    GitHub → Settings → Developer settings → OAuth Apps → New OAuth App
+    ```
+
+    Fill in the form fields:
+
+    | Field | Value |
+    |-------|-------|
+    | Application name | Any descriptive name, e.g. `R2 MCP Worker` |
+    | Homepage URL | Your Worker URL, e.g. `https://my-worker.example.workers.dev` |
+    | Authorization callback URL | `https://<worker-url>/callback` |
+
+    For local development with a public tunnel (e.g. Cloudflare Tunnel or ngrok), use the tunnel URL as the callback:
+
+    ```text
+    https://<tunnel-url>/callback
+    ```
+
+    After creating the app, GitHub will display a **Client ID**. Click **Generate a new client secret** to obtain the **Client Secret**. Copy both values — you will need them in a later step.
+
+    <Warning>
+      The callback URL must match exactly. A mismatch between the registered URL and the URL the Worker constructs at runtime will cause every OAuth flow to fail with a redirect URI mismatch error from GitHub.
+    </Warning>
+  </Step>
+
+  <Step title="Create the KV namespace for OAuth state">
+    The Worker stores short-lived OAuth state tokens in Cloudflare KV. Create the namespace with Wrangler:
+
+    ```sh
+    npx wrangler kv namespace create OAUTH_KV
+    ```
+
+    Wrangler prints output similar to:
+
+    ```text
+    ✨ Success!
+    Add the following to your wrangler.jsonc file:
+    { binding = "OAUTH_KV", id = "abc123..." }
+    ```
+
+    Copy the generated namespace ID and add it to `wrangler.jsonc`:
+
+    ```jsonc
+    "kv_namespaces": [
+      {
+        "binding": "OAUTH_KV",
+        "id": "your-kv-namespace-id"
+      }
+    ]
+    ```
+
+    The `binding` value must be exactly `OAUTH_KV`. The Worker looks up this binding by name at startup; if it is absent, the OAuth flow returns a `500` before reaching GitHub.
+  </Step>
+
+  <Step title="Configure the allowlist">
+    Add `AUTH_MODE` and `ALLOWED_GITHUB_LOGINS` to the `vars` section of `wrangler.jsonc`:
+
+    ```jsonc
+    "vars": {
+      "AUTH_MODE": "github",
+      "ALLOWED_GITHUB_LOGINS": "your-github-login"
+    }
+    ```
+
+    For multiple users, use a comma-separated list:
+
+    ```jsonc
+    "ALLOWED_GITHUB_LOGINS": "alice,bob,charlie"
+    ```
+
+    Matching is **case-insensitive** — `Alice` and `alice` are treated as the same login. If `ALLOWED_GITHUB_LOGINS` is empty or omitted, **no login is accepted**. Every callback attempt will return `403`, even for valid GitHub accounts.
+  </Step>
+
+  <Step title="Set the required secrets">
+    Deploy the GitHub OAuth credentials and the cookie encryption key as Wrangler secrets. Secrets are encrypted at rest and never appear in `wrangler.jsonc` or deployment logs.
+
+    ```sh
+    npx wrangler secret put GITHUB_CLIENT_ID -c wrangler.jsonc
+    npx wrangler secret put GITHUB_CLIENT_SECRET -c wrangler.jsonc
+    npx wrangler secret put COOKIE_ENCRYPTION_KEY -c wrangler.jsonc
+    ```
+
+    Each command prompts for the value interactively.
+
+    Generate a strong `COOKIE_ENCRYPTION_KEY` with:
+
+    ```sh
+    openssl rand -base64 32
+    ```
+
+    This key is used to sign and verify the `__Host-APPROVED_CLIENTS` cookie that tracks which MCP clients a user has already approved. Use a randomly generated value with at least 256 bits of entropy — do not reuse a password or API token.
+
+    <Note>
+      For local development, place these values in `.dev.vars` instead of running `wrangler secret put`. Wrangler loads `.dev.vars` automatically during `wrangler dev`. Never commit `.dev.vars` to version control.
+    </Note>
+  </Step>
+
+</Steps>
+
+## Allowlist behavior
+
+The `ALLOWED_GITHUB_LOGINS` value is parsed at request time in the `/callback` handler. Parsing rules:
+
+- Split on `,`
+- Trim whitespace from each entry
+- Lowercase all entries
+- Filter out empty strings
+
+The incoming GitHub login is lowercased before comparison. An exact match against the parsed list is required. If no match is found, the Worker responds with `403` and the message `GitHub login is not allowed to access this MCP server`.
+
+## Failure modes
+
+<AccordionGroup>
+  <Accordion title="OAuth fails before reaching GitHub">
+    The authorization flow never redirects to GitHub if any of the following are true:
+
+    - `AUTH_MODE` is not set to `github` (or is omitted and defaults to `github` but the Worker is receiving direct `/mcp` traffic that bypasses the OAuth provider)
+    - `OAUTH_KV` binding is missing from `wrangler.jsonc`
+    - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, or `COOKIE_ENCRYPTION_KEY` secrets are not set
+
+    In each case the Worker returns a `500` JSON error describing the missing configuration. Check the Workers logs in the Cloudflare dashboard or run `wrangler tail` to see the exact error message.
+  </Accordion>
+
+  <Accordion title="GitHub login completes but access is denied">
+    If GitHub authentication succeeds but the user's login is not in `ALLOWED_GITHUB_LOGINS`, the `/callback` handler returns a `403` response. The MCP client will not receive a token.
+
+    To resolve this, add the GitHub login to `ALLOWED_GITHUB_LOGINS` in `wrangler.jsonc` and redeploy:
+
+    ```sh
+    npx wrangler deploy -c wrangler.jsonc
+    ```
+
+    Note that `vars` changes require a redeployment — updating `wrangler.jsonc` alone does not push changes to the live Worker.
+  </Accordion>
+
+  <Accordion title="Callback fails with a redirect URI mismatch">
+    GitHub validates the `redirect_uri` parameter against the callback URL registered in the OAuth App settings. If the Worker's deployed URL differs from the registered callback URL, GitHub rejects the authorization code exchange.
+
+    Common causes:
+    - Worker was deployed to a different subdomain or custom domain after the OAuth App was created
+    - Local tunnel URL changed between sessions
+    - `https://` vs `http://` mismatch
+
+    Update the **Authorization callback URL** in the GitHub OAuth App settings to match the current Worker URL exactly, including the `/callback` path.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication Overview" href="/auth/overview">
+    Understand the auth boundary, OAuth flow, and KV state model.
+  </Card>
+  <Card title="Connect ChatGPT" href="/clients/chatgpt">
+    Configure ChatGPT to authenticate with this Worker as a remote MCP server.
+  </Card>
+</CardGroup>

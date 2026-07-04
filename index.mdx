@@ -1,20 +1,76 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Cloudflare R2 Remote MCP Worker"
+sidebarTitle: "Home"
+description: "Deploy a remote MCP server on Cloudflare Workers to give AI clients like ChatGPT direct, OAuth-protected access to your R2 bucket."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+The Cloudflare R2 Remote MCP Worker turns your Cloudflare R2 bucket into an MCP-accessible object store. Deploy it as a Cloudflare Worker, connect ChatGPT or any MCP client, and let AI agents list, read, write, copy, move, and delete objects — all behind GitHub OAuth authentication.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone, configure, and deploy in under 15 minutes. Get ChatGPT talking to your R2 bucket.
+  </Card>
+  <Card title="Deploy Guide" icon="cloud-arrow-up" href="/deployment/deploy">
+    Step-by-step deployment: buckets, KV namespaces, OAuth secrets, and Wrangler.
+  </Card>
+  <Card title="Tools Reference" icon="wrench" href="/tools/overview">
+    All 24 MCP tools — object CRUD, base64 transfer, presigned URLs, and admin read tools.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/auth/overview">
+    GitHub OAuth flow, allowlist configuration, and AUTH_MODE options.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What This Is
+
+The worker exposes R2 object operations through a remote MCP endpoint at `/mcp`. With `AUTH_MODE=github`, every MCP client must authenticate through GitHub OAuth before reaching your bucket. The GitHub login is checked against a configurable allowlist — no extra identity infrastructure required.
+
+```
+ChatGPT / MCP client
+  → GitHub OAuth (/authorize → /callback)
+  → Cloudflare Worker /mcp
+  → R2 bucket
+```
+
+<CardGroup cols={3}>
+  <Card title="Object Tools" icon="box" href="/tools/object-tools">
+    list, head, get, put, delete, copy, move, rename
+  </Card>
+  <Card title="Transfer Tools" icon="arrow-right-arrow-left" href="/tools/transfer-tools">
+    Base64 upload and download for binary objects
+  </Card>
+  <Card title="Presigned URLs" icon="link" href="/tools/presign-tools">
+    Temporary GET/PUT URLs via R2 S3-compatible API
+  </Card>
+</CardGroup>
+
+## Getting Started
+
+<Steps>
+  <Step title="Install dependencies and log in to Cloudflare">
+    ```bash
+    npm install
+    npx wrangler login
+    ```
+  </Step>
+  <Step title="Create your R2 bucket and configure the worker">
+    ```bash
+    npx wrangler r2 bucket create your-bucket-name
+    cp wrangler.example.jsonc wrangler.jsonc
+    ```
+    Edit `wrangler.jsonc` with your bucket name, worker name, and GitHub allowlist.
+  </Step>
+  <Step title="Set up GitHub OAuth and deploy">
+    Create a GitHub OAuth App with callback URL `https://<worker-url>/callback`, set secrets with `wrangler secret put`, then deploy:
+    ```bash
+    npm run deploy
+    ```
+  </Step>
+  <Step title="Connect ChatGPT or MCP Inspector">
+    Point your MCP client at `https://<worker-url>/mcp` with OAuth authentication. Approve the GitHub login and start issuing R2 commands.
+  </Step>
+</Steps>
+
+<Note>
+  For local development without OAuth, set `AUTH_MODE=none` in `.dev.vars` and run `npm run dev`. Never expose `AUTH_MODE=none` on a public URL.
+</Note>

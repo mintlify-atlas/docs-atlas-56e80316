@@ -1,0 +1,262 @@
+---
+title: "Environment Variables and Worker Configuration"
+sidebarTitle: "Configuration"
+description: "Complete reference for every environment variable, Wrangler binding, and secret used by the R2 MCP Worker — defaults, types, and security guidance."
+---
+
+The R2 MCP Worker is configured entirely through Cloudflare Workers environment variables and platform bindings. Non-sensitive values live in `wrangler.jsonc` under `vars`. Sensitive values — OAuth credentials, API tokens, and encryption keys — are stored with `wrangler secret put` and never appear in the repository. Local development uses `.dev.vars` as a flat key-value file that Wrangler injects at runtime.
+
+## `wrangler.jsonc` reference
+
+Copy `wrangler.example.jsonc` to `wrangler.jsonc` and edit for your deployment. The full example:
+
+```jsonc
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-r2-remote-mcp-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "r2_buckets": [
+    {
+      "binding": "R2_BUCKET",
+      "bucket_name": "example-bucket",
+      "preview_bucket_name": "example-bucket-preview"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "vars": {
+    "AUTH_MODE": "github",
+    "ALLOWED_GITHUB_LOGINS": "your-github-login",
+    "R2_BUCKET_NAME": "example-bucket",
+    "R2_ROOT_PREFIX": "",
+    "MAX_INLINE_TEXT_BYTES": "262144",
+    "MAX_TRANSFER_BYTES": "1048576",
+    "MAX_LIST_LIMIT": "100",
+    "ENABLE_ACCOUNT_TOOLS": "false",
+    "ENABLE_PRESIGN_TOOLS": "false"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "dev": {
+    "port": 8787
+  }
+}
+```
+
+<Warning>
+  `wrangler.jsonc` and `.dev.vars` are listed in `.gitignore` and must never be committed. They contain real bucket names, namespace IDs, and (for `.dev.vars`) secrets. Use `wrangler secret put` for all production secrets.
+</Warning>
+
+## `.dev.vars` reference
+
+For local development, create `.dev.vars` by copying the example file:
+
+```sh
+cp .dev.vars.example .dev.vars
+```
+
+The example file (edit before use — never commit real values):
+
+```ini
+# Copy to .dev.vars for local development. Do not commit real values.
+
+# Local development only. Use AUTH_MODE=github for public deployments.
+AUTH_MODE=none
+
+R2_ROOT_PREFIX=
+MAX_INLINE_TEXT_BYTES=262144
+MAX_TRANSFER_BYTES=1048576
+MAX_LIST_LIMIT=100
+
+# Optional. Required by read-only account tools and presign tools.
+R2_BUCKET_NAME=example-bucket
+
+# Optional read-only Cloudflare account API tools.
+ENABLE_ACCOUNT_TOOLS=false
+CLOUDFLARE_ACCOUNT_ID=00000000000000000000000000000000
+CLOUDFLARE_API_TOKEN=replace-with-read-only-token
+
+# GitHub OAuth App authentication. Required when AUTH_MODE=github.
+ALLOWED_GITHUB_LOGINS=your-github-login
+GITHUB_CLIENT_ID=replace-with-github-oauth-client-id
+GITHUB_CLIENT_SECRET=replace-with-github-oauth-client-secret
+COOKIE_ENCRYPTION_KEY=replace-with-at-least-32-random-bytes
+
+# Optional presigned URL tools.
+ENABLE_PRESIGN_TOOLS=false
+R2_ACCESS_KEY_ID=replace-with-r2-access-key-id
+R2_SECRET_ACCESS_KEY=replace-with-r2-secret-access-key
+R2_S3_REGION=auto
+# R2_S3_ENDPOINT=https://00000000000000000000000000000000.r2.cloudflarestorage.com
+```
+
+---
+
+## Environment variable reference
+
+### Authentication
+
+<ParamField body="AUTH_MODE" type='"github" | "none"' default='"github"'>
+  Controls how the Worker authenticates incoming requests.
+
+  - `"github"` — All requests to `/mcp` are gated by GitHub OAuth. Requires `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `COOKIE_ENCRYPTION_KEY`, and the `OAUTH_KV` binding.
+  - `"none"` — No authentication. Use only for local development. Never deploy with `AUTH_MODE=none` on a public endpoint.
+</ParamField>
+
+<ParamField body="ALLOWED_GITHUB_LOGINS" type="string">
+  Comma-separated list of GitHub usernames permitted to access the MCP endpoint when `AUTH_MODE=github`. Users who authenticate successfully via GitHub but whose login is not in this list receive a 403 response.
+
+  Example: `"alice,bob,carol"`
+</ParamField>
+
+### R2 bucket
+
+<ParamField body="R2_BUCKET_NAME" type="string">
+  The name of the bound R2 bucket. This must match `r2_buckets[0].bucket_name` in `wrangler.jsonc`. Required by account tools and presign tools. Object tools use the `R2_BUCKET` binding directly and do not read this variable.
+</ParamField>
+
+<ParamField body="R2_ROOT_PREFIX" type="string" default='""'>
+  An optional path prefix used to scope all object key operations. When set, every object key passed to the Worker is prefixed with `<R2_ROOT_PREFIX>/` before being sent to R2, and the prefix is stripped from keys returned to the client.
+
+  This allows multiple Worker deployments to share a single bucket with isolated namespaces. See [R2_ROOT_PREFIX scoping](#r2_root_prefix-scoping) below for rules and examples.
+</ParamField>
+
+### Transfer limits
+
+<ParamField body="MAX_INLINE_TEXT_BYTES" type="number" default="262144">
+  Maximum size in bytes (default 256 KB) for object content returned inline in a tool response. Objects larger than this threshold are not returned inline — the tool response indicates the object is too large and the client should use a direct download or presigned URL instead.
+</ParamField>
+
+<ParamField body="MAX_TRANSFER_BYTES" type="number" default="1048576">
+  Maximum size in bytes (default 1 MB) for objects transferred through the Worker during upload or download operations. Requests exceeding this limit are rejected with an error.
+</ParamField>
+
+<ParamField body="MAX_LIST_LIMIT" type="number" default="100">
+  Maximum number of objects returned in a single `r2_object_list` call. The client may request fewer, but cannot exceed this value.
+</ParamField>
+
+### Feature flags
+
+<ParamField body="ENABLE_ACCOUNT_TOOLS" type='"true" | "false"' default='"false"'>
+  When `"true"`, enables read-only Cloudflare account API tools that expose bucket-level metadata and usage statistics. Requires `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, and `R2_BUCKET_NAME`.
+</ParamField>
+
+<ParamField body="ENABLE_PRESIGN_TOOLS" type='"true" | "false"' default='"false"'>
+  When `"true"`, enables tools that generate time-limited pre-signed S3-compatible URLs for direct R2 access. Requires `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and optionally `R2_S3_REGION` and `R2_S3_ENDPOINT`.
+</ParamField>
+
+### Account tools (optional)
+
+<ParamField body="CLOUDFLARE_ACCOUNT_ID" type="string">
+  Your Cloudflare account ID. Required when `ENABLE_ACCOUNT_TOOLS=true`. Also used to derive the default `R2_S3_ENDPOINT` when presign tools are enabled and `R2_S3_ENDPOINT` is not explicitly set.
+</ParamField>
+
+<ParamField body="CLOUDFLARE_API_TOKEN" type="string">
+  A Cloudflare API token with read access to the R2 resources in your account. Required when `ENABLE_ACCOUNT_TOOLS=true`. Use the narrowest token scope sufficient for your deployment. **Must be set with `wrangler secret put`, not in `wrangler.jsonc`.**
+</ParamField>
+
+### Presign tools (optional)
+
+<ParamField body="R2_ACCESS_KEY_ID" type="string">
+  The access key ID portion of an R2 API token with S3-compatible API access. Required when `ENABLE_PRESIGN_TOOLS=true`. Generate R2 API tokens in **Cloudflare Dashboard → R2 → Manage R2 API tokens**. **Must be set with `wrangler secret put`.**
+</ParamField>
+
+<ParamField body="R2_SECRET_ACCESS_KEY" type="string">
+  The secret access key portion of an R2 API token. Required when `ENABLE_PRESIGN_TOOLS=true`. **Must be set with `wrangler secret put`.**
+</ParamField>
+
+<ParamField body="R2_S3_REGION" type="string" default='"auto"'>
+  The S3 region string used when constructing pre-signed URLs. Cloudflare R2 uses `"auto"` as the canonical region identifier. Override only if your setup requires a specific region string.
+</ParamField>
+
+<ParamField body="R2_S3_ENDPOINT" type="string">
+  The S3-compatible endpoint URL for R2. Optional — if omitted and `CLOUDFLARE_ACCOUNT_ID` is set, the Worker derives it as:
+
+  ```text
+  https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com
+  ```
+
+  Set this explicitly if you need to target a custom domain or a non-standard endpoint.
+</ParamField>
+
+### GitHub OAuth secrets
+
+<ParamField body="GITHUB_CLIENT_ID" type="string">
+  The Client ID from your GitHub OAuth App. Required when `AUTH_MODE=github`. **Must be set with `wrangler secret put`, not in `wrangler.jsonc`.**
+</ParamField>
+
+<ParamField body="GITHUB_CLIENT_SECRET" type="string">
+  The Client Secret from your GitHub OAuth App. Required when `AUTH_MODE=github`. **Must be set with `wrangler secret put`.**
+</ParamField>
+
+<ParamField body="COOKIE_ENCRYPTION_KEY" type="string">
+  A random, high-entropy string used to encrypt OAuth session cookies. Must be at least 32 characters. Generate with:
+
+  ```sh
+  openssl rand -base64 32
+  ```
+
+  Required when `AUTH_MODE=github`. **Must be set with `wrangler secret put`.**
+</ParamField>
+
+---
+
+## Wrangler secrets vs. `vars`
+
+Cloudflare Workers distinguishes between two kinds of runtime values:
+
+| Kind | Where set | Visible in dashboard | Use for |
+|---|---|---|---|
+| **Vars** | `wrangler.jsonc` → `vars` | Yes (plaintext) | Non-sensitive config: feature flags, limits, bucket names |
+| **Secrets** | `wrangler secret put` | No (encrypted) | OAuth credentials, API tokens, encryption keys |
+
+Set secrets with:
+
+```sh
+npx wrangler secret put GITHUB_CLIENT_ID -c wrangler.jsonc
+npx wrangler secret put GITHUB_CLIENT_SECRET -c wrangler.jsonc
+npx wrangler secret put COOKIE_ENCRYPTION_KEY -c wrangler.jsonc
+npx wrangler secret put CLOUDFLARE_API_TOKEN -c wrangler.jsonc   # if account tools enabled
+npx wrangler secret put R2_ACCESS_KEY_ID -c wrangler.jsonc       # if presign tools enabled
+npx wrangler secret put R2_SECRET_ACCESS_KEY -c wrangler.jsonc   # if presign tools enabled
+```
+
+Once submitted, secret values cannot be read back — only overwritten or deleted. The Worker runtime receives them as ordinary environment variables at request time.
+
+---
+
+## `R2_ROOT_PREFIX` scoping
+
+When `R2_ROOT_PREFIX` is set, the Worker transparently prepends the prefix to every object key before sending it to R2, and strips it from keys returned to the client. This lets multiple Worker deployments share one bucket with isolated key namespaces.
+
+**How scoping works:**
+
+- A client key of `images/photo.jpg` with `R2_ROOT_PREFIX=tenant-a` becomes `tenant-a/images/photo.jpg` in R2.
+- List operations are automatically restricted to the prefix — the client cannot enumerate objects outside it.
+- Attempts to escape the prefix (e.g. via `../`) are rejected with a 403 error.
+
+**Valid prefix values:**
+
+```text
+""              — no scoping (full bucket access)
+"tenant-a"      — single-level prefix
+"org/team/env"  — multi-level prefix
+```
+
+**Invalid prefix values (rejected at startup or request time):**
+
+```text
+"/leading-slash"    — absolute paths not allowed
+"C:\\windows"       — drive-letter paths not allowed
+"path/../escape"    — dot-dot segments not allowed
+"path//double"      — double slashes collapsed, then validated
+```
+
+The prefix is normalized using the same path sanitization applied to all object keys, so trailing slashes and repeated slashes are cleaned up automatically.

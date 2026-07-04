@@ -1,0 +1,118 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Cloudflare R2 Remote MCP Worker",
+  "projectDescription": "A remote MCP server that exposes Cloudflare R2 object storage operations to AI clients like ChatGPT via GitHub OAuth-protected Cloudflare Workers.",
+  "theme": "aspen",
+  "primaryColor": "#F6821F",
+  "lightColor": "#FDE68A",
+  "darkColor": "#C05621",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/deploy",
+              "deployment/configuration",
+              "deployment/verify"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "auth/overview",
+              "auth/github-oauth",
+              "auth/security"
+            ]
+          },
+          {
+            "group": "Client Setup",
+            "pages": [
+              "clients/connecting",
+              "clients/chatgpt",
+              "clients/mcp-inspector"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tools Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "tools/overview"
+            ]
+          },
+          {
+            "group": "Object Tools",
+            "pages": [
+              "tools/object-tools",
+              "tools/transfer-tools"
+            ]
+          },
+          {
+            "group": "Optional Tools",
+            "pages": [
+              "tools/presign-tools",
+              "tools/admin-tools"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Remote MCP endpoint on Cloudflare Workers for R2 object storage",
+    "GitHub OAuth authentication with configurable login allowlist",
+    "Full object CRUD: list, head, get, put, delete, copy, move, rename",
+    "Base64 upload and download transfer tools for binary objects",
+    "Optional presigned GET/PUT URL generation using R2 S3-compatible API",
+    "Optional read-only Cloudflare account/admin tools (bucket metadata, CORS, lifecycle, domains, notifications, metrics)",
+    "Root prefix scoping to restrict MCP access to a bucket subtree",
+    "Destructive operation guards with confirm: true and dryRun: true",
+    "Health endpoint (/healthz) for bucket accessibility verification",
+    "AUTH_MODE=none for local development without OAuth"
+  ],
+  "publicApiSurface": [
+    "GET /healthz — health and config status endpoint",
+    "POST /mcp — remote MCP endpoint (streamable HTTP)",
+    "GET /authorize — OAuth authorization start",
+    "GET /callback — GitHub OAuth callback",
+    "POST /token — OAuth token endpoint",
+    "POST /register — OAuth dynamic client registration",
+    "r2_object_list — list objects under root prefix",
+    "r2_object_head — get object metadata",
+    "r2_object_get — read text-like object body",
+    "r2_object_put — write UTF-8 text to an object",
+    "r2_object_put_if_absent — create object only if absent",
+    "r2_object_delete — delete one object (confirm: true)",
+    "r2_object_delete_many — delete multiple objects (confirm: true, dryRun optional)",
+    "r2_object_copy — copy object to new key",
+    "r2_object_move — move object (copy + delete, confirm: true, dryRun optional)",
+    "r2_object_rename — rename object within prefix (confirm: true, dryRun optional)",
+    "r2_upload_base64 — upload base64-encoded payload",
+    "r2_download_base64 — download object as base64",
+    "r2_presign_get — create presigned GET URL (optional)",
+    "r2_presign_put — create presigned PUT URL (optional)",
+    "r2_bucket_list — list buckets in account (optional admin)",
+    "r2_bucket_get — get bucket metadata (optional admin)",
+    "r2_cors_get — get bucket CORS rules (optional admin)",
+    "r2_lifecycle_get — get bucket lifecycle rules (optional admin)",
+    "r2_domain_custom_list — list custom domains (optional admin)",
+    "r2_domain_custom_get — get custom domain settings (optional admin)",
+    "r2_domain_managed_get — get r2.dev managed domain settings (optional admin)",
+    "r2_notifications_list — list event notification rules (optional admin)",
+    "r2_notifications_get — get one notification queue config (optional admin)",
+    "r2_metrics_get — get account-level R2 storage metrics (optional admin)"
+  ]
+}

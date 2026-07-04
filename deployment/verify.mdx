@@ -1,0 +1,239 @@
+---
+title: "Verify Your R2 MCP Worker Deployment"
+sidebarTitle: "Verify"
+description: "Run static checks, health probes, and MCP Inspector tool listing to confirm your R2 MCP Worker is correctly deployed and all tools are accessible."
+---
+
+After deploying the R2 MCP Worker, a short verification sequence confirms that the TypeScript project compiles cleanly, the Worker can reach its R2 bucket, and the MCP endpoint exposes the expected set of tools. Work through the checks in order — each layer builds on the one before it.
+
+---
+
+## Static checks
+
+These checks run entirely offline against the local source tree and confirm the project is well-formed before any Worker is started.
+
+```sh
+npm install
+npm run type-check
+npm run smoke
+```
+
+`type-check` compiles the TypeScript project with `tsc --noEmit` and exits non-zero on any type error. `smoke` verifies that all expected source files are present, the `package.json` scripts exist, and key reference URLs appear in `docs/references.md`.
+
+Expected output:
+
+```text
+type-check exits 0
+smoke ok
+```
+
+If `smoke` reports a missing file, ensure you have not accidentally deleted any source or documentation file tracked by the check. If `type-check` fails, fix the type errors before proceeding.
+
+---
+
+## Health check
+
+The `/healthz` endpoint is the fastest way to confirm that the deployed (or locally running) Worker can load its configuration and reach the bound R2 bucket.
+
+**Local:**
+
+```sh
+npm run dev
+```
+
+Then open or `curl`:
+
+```text
+http://localhost:8787/healthz
+```
+
+**Remote (after `npm run deploy`):**
+
+```text
+https://<worker-name>.<account-subdomain>.workers.dev/healthz
+```
+
+### Expected response
+
+A healthy Worker returns HTTP 200 with all configuration fields reflected back:
+
+```json
+{
+  "ok": true,
+  "bucketAccessible": true,
+  "authMode": "github",
+  "accountToolsEnabled": false,
+  "presignToolsEnabled": false,
+  "rootPrefix": "",
+  "maxInlineTextBytes": 262144,
+  "maxListLimit": 100,
+  "maxTransferBytes": 1048576
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ok` | boolean | `true` when the bucket probe succeeded |
+| `bucketAccessible` | boolean | `true` when R2 responded to a list probe |
+| `authMode` | `"github"` \| `"none"` | Active authentication mode |
+| `accountToolsEnabled` | boolean | Whether account tools are registered |
+| `presignToolsEnabled` | boolean | Whether presign tools are registered |
+| `rootPrefix` | string | Active root prefix (empty string = no scoping) |
+| `maxInlineTextBytes` | number | Inline content size limit in bytes |
+| `maxListLimit` | number | Maximum objects per list call |
+| `maxTransferBytes` | number | Maximum upload/download size in bytes |
+
+If the Worker cannot reach the bucket, it returns HTTP 503:
+
+```json
+{
+  "ok": false,
+  "bucketAccessible": false,
+  "error": "..."
+}
+```
+
+---
+
+## MCP tools/list verification
+
+`tools/list` confirms that the MCP endpoint is reachable and returns the expected tool set. The easiest way to run it interactively is with MCP Inspector.
+
+Launch MCP Inspector:
+
+```sh
+npx @modelcontextprotocol/inspector@latest
+```
+
+Connect to your Worker's MCP endpoint:
+
+```text
+https://<worker-name>.<account-subdomain>.workers.dev/mcp
+```
+
+For local development with `AUTH_MODE=none`:
+
+```text
+http://localhost:8787/mcp
+```
+
+When `AUTH_MODE=github`:
+
+1. MCP Inspector opens a browser window for OAuth.
+2. Complete the GitHub login flow.
+3. Ensure your GitHub login appears in `ALLOWED_GITHUB_LOGINS`.
+4. After a successful login, `tools/list` is available in the Inspector UI.
+
+See [MCP Inspector setup](/clients/mcp-inspector) for detailed configuration instructions.
+
+---
+
+## Expected default tools
+
+With default feature flags (`ENABLE_ACCOUNT_TOOLS=false`, `ENABLE_PRESIGN_TOOLS=false`), `tools/list` should return exactly these tools:
+
+```text
+r2_download_base64
+r2_object_copy
+r2_object_delete
+r2_object_delete_many
+r2_object_get
+r2_object_head
+r2_object_list
+r2_object_move
+r2_object_put
+r2_object_put_if_absent
+r2_object_rename
+r2_upload_base64
+```
+
+<Tip>
+  When `ENABLE_ACCOUNT_TOOLS=true`, additional read-only admin tools appear in the list alongside the default object tools. When `ENABLE_PRESIGN_TOOLS=true`, presign tools for generating time-limited S3 URLs also appear.
+</Tip>
+
+---
+
+## SDK tools/list smoke test
+
+For automated verification in local development with `AUTH_MODE=none`, you can query the MCP endpoint directly using the MCP TypeScript SDK.
+
+Start the Worker:
+
+```sh
+npm run dev
+```
+
+Run the inline script:
+
+```sh
+node --input-type=module <<'EOF'
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const client = new Client({ name: "r2-mcp-verify", version: "0.0.0" });
+const transport = new StreamableHTTPClientTransport(new URL("http://127.0.0.1:8787/mcp"));
+await client.connect(transport);
+const tools = await client.listTools();
+console.log(JSON.stringify(tools.tools.map((tool) => tool.name).sort(), null, 2));
+await client.close();
+EOF
+```
+
+Expected output includes at minimum:
+
+```text
+r2_download_base64
+r2_object_get
+r2_object_list
+r2_object_put
+```
+
+A complete successful run prints all twelve default tool names as a sorted JSON array.
+
+---
+
+## Failure modes
+
+<AccordionGroup>
+
+<Accordion title="/healthz returns 503 or 'bucketAccessible: false'">
+  The Worker started successfully but could not execute a list probe against the R2 bucket. Common causes:
+
+  - The `R2_BUCKET` binding is missing or not saved in `wrangler.jsonc`.
+  - `r2_buckets[0].bucket_name` (for production) or `preview_bucket_name` (for local) does not match an existing bucket.
+  - You deployed with a `wrangler.jsonc` that still contains the placeholder bucket name from the example file.
+
+  Fix: verify that `wrangler.jsonc` contains the correct bucket names, then redeploy or restart `npm run dev`.
+</Accordion>
+
+<Accordion title="OAuth flow fails or does not redirect">
+  The GitHub OAuth callback URL does not match the Worker URL, or required OAuth secrets are missing.
+
+  - Check that the **Authorization callback URL** in your GitHub OAuth App settings matches `https://<worker-url>/callback` exactly.
+  - Confirm that `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `COOKIE_ENCRYPTION_KEY` are all set via `wrangler secret put`.
+  - Confirm that the `OAUTH_KV` binding in `wrangler.jsonc` has a valid namespace ID (not the placeholder `00000000...`).
+
+  Fix: update the GitHub OAuth App callback URL, re-run `wrangler secret put` for any missing secrets, and redeploy.
+</Accordion>
+
+<Accordion title="Login succeeds but access is denied (403)">
+  The GitHub OAuth flow completed successfully, but the authenticated username is not in the allow-list.
+
+  - Open `wrangler.jsonc` and check `vars.ALLOWED_GITHUB_LOGINS`.
+  - The value must be a comma-separated list of exact GitHub usernames (case-insensitive matching depends on the OAuth handler — use the exact casing from your GitHub profile to be safe).
+
+  Fix: add your GitHub username to `ALLOWED_GITHUB_LOGINS` in `wrangler.jsonc` and redeploy.
+</Accordion>
+
+<Accordion title="tools/list returns fewer tools than expected">
+  The MCP endpoint is reachable but some tools are missing from the list.
+
+  - Account tools (`r2_bucket_list`, etc.) only appear when `ENABLE_ACCOUNT_TOOLS=true` and `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, and `R2_BUCKET_NAME` are all set.
+  - Presign tools only appear when `ENABLE_PRESIGN_TOOLS=true` and `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET_NAME` are all set.
+  - If your MCP client cached the tool list before a server change, disconnect and reconnect to force a refresh.
+  - Confirm the client is connected to the correct Worker URL — a mismatch with a different deployment or a stale local server is a common source of confusion.
+
+  Fix: enable the required feature flag in `wrangler.jsonc`, set all required variables and secrets, redeploy, and reconnect your client.
+</Accordion>
+
+</AccordionGroup>

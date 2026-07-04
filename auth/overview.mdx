@@ -1,0 +1,90 @@
+---
+title: "Authentication Overview: GitHub OAuth for MCP"
+sidebarTitle: "Overview"
+description: "GitHub OAuth identifies who may reach the /mcp endpoint by login allowlist. It does not grant the Worker or MCP clients access to any GitHub repository."
+---
+
+GitHub OAuth is the identity layer for this Worker. When `AUTH_MODE=github`, every request to `/mcp` must carry a token issued through the OAuth flow — and that token was granted only after the caller's GitHub login was verified against the configured allowlist. Critically, the OAuth integration only reads the authenticated user's public login; it does **not** grant the Worker or the MCP client access to any GitHub repository, organization, or private data.
+
+## Auth modes
+
+Two modes are supported. The Worker defaults to `github` when `AUTH_MODE` is omitted.
+
+| Mode | Use |
+|------|-----|
+| `AUTH_MODE=github` | Public deployments. All `/mcp` traffic requires a valid OAuth token issued to an allowed GitHub login. |
+| `AUTH_MODE=none` | Local development or endpoints already protected by an external access layer. No token is required. |
+
+<Warning>
+  Never expose `AUTH_MODE=none` on a public URL. Without authentication, any client that can reach `/mcp` can call all enabled tools against your R2 bucket.
+</Warning>
+
+## OAuth request flow
+
+The following sequence shows how a first-time MCP client obtains a token and then calls the protected endpoint.
+
+```text
+MCP client
+  → Worker /authorize         (client redirected to start OAuth)
+  → GitHub login              (user authenticates on github.com)
+  → Worker /callback          (GitHub redirects back with code)
+  → allowlist check           (login compared to ALLOWED_GITHUB_LOGINS)
+  → MCP client receives token (OAuth token issued by the Worker)
+  → MCP client calls /mcp     (token presented on every tool call)
+```
+
+The Worker validates the `state` parameter at `/callback` using a KV-stored entry created at `/authorize`, preventing CSRF attacks during the flow.
+
+## Exposed OAuth routes
+
+The Worker registers the following routes through `@cloudflare/workers-oauth-provider`:
+
+| Route | Description |
+|-------|-------------|
+| `/authorize` | Begins the OAuth authorization flow. Renders an approval dialog on the first visit from a given client. |
+| `/callback` | Receives the GitHub authorization code, exchanges it for an access token, and checks the login against the allowlist. |
+| `/token` | OAuth token endpoint used by MCP clients to obtain and refresh access tokens. |
+| `/register` | Dynamic client registration endpoint, allowing MCP clients to self-register. |
+
+Clients should be configured with only the `/mcp` URL. The OAuth routes are handled automatically by the Worker before traffic reaches the MCP handler.
+
+## Allowlist
+
+The `ALLOWED_GITHUB_LOGINS` variable controls which GitHub users are permitted. The value is a comma-separated list of GitHub login names. Matching is case-insensitive.
+
+```text
+alice,bob,charlie
+```
+
+If `ALLOWED_GITHUB_LOGINS` is empty or unset, **no login is accepted** — the `/callback` handler will deny every authentication attempt with a `403` response. This is intentional: an empty allowlist is a safe default that prevents accidental open access.
+
+## R2 access is separate from OAuth
+
+OAuth only gates the MCP endpoint. R2 access itself is determined by the Worker's resource bindings and credentials:
+
+- **`R2_BUCKET` binding** — used by all object tools for reads, writes, deletes, and listings.
+- **`CLOUDFLARE_API_TOKEN`** — required only for read-only account administration tools.
+- **R2 S3 credentials (`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`)** — required only for presigned URL generation.
+
+A user who passes the OAuth flow can only access what the Worker's own binding and configuration permits.
+
+## KV state storage
+
+OAuth state tokens are written to the `OAUTH_KV` KV namespace during `/authorize` and deleted after a successful `/callback`. This prevents replay and CSRF attacks. State entries expire automatically after 600 seconds.
+
+The `OAUTH_KV` binding must be present when `AUTH_MODE=github`. If it is missing, the Worker returns a `500` error before redirecting to GitHub.
+
+<Note>
+  This project uses a **GitHub OAuth App**, not a GitHub App. GitHub Apps use installation IDs, private keys, and repository-scoped permissions — that model is not used here. Do not create a GitHub App, and do not use a personal access token as a substitute for OAuth.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="GitHub OAuth Setup" href="/auth/github-oauth">
+    Step-by-step guide to creating the OAuth App, KV namespace, and secrets.
+  </Card>
+  <Card title="Security Model" href="/auth/security">
+    Threat model, destructive-operation guards, and public deployment checklist.
+  </Card>
+</CardGroup>

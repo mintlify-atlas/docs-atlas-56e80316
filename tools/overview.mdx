@@ -1,0 +1,106 @@
+---
+title: "MCP Tools Reference: R2 Worker Tool Surfaces"
+sidebarTitle: "Overview"
+description: "Three tool surfaces expose R2 operations via MCP: a default binding surface plus optional Cloudflare API admin and S3-compatible presign surfaces."
+---
+
+The Cloudflare R2 Remote MCP Worker organizes its tools into three distinct surfaces, each backed by a different credential type. The **Worker R2 binding** surface is always active and covers every object CRUD and binary transfer operation against the bucket bound to the Worker. Two additional surfaces — read-only **Cloudflare API admin tools** and **S3-compatible presigned URL tools** — are disabled by default and must be opted in through environment variables.
+
+## Tool surfaces
+
+| Surface | Tools | Required credentials |
+|---|---|---|
+| Worker R2 binding | Object CRUD and base64 transfer tools | `R2_BUCKET` Workers binding |
+| Cloudflare API | Read-only account and admin tools (optional) | `CLOUDFLARE_API_TOKEN` |
+| S3-compatible API | Presigned URL tools (optional) | `R2_ACCESS_KEY_ID` + `R2_SECRET_ACCESS_KEY` |
+
+## Default-enabled tools
+
+The following 12 tools register automatically on every deployment. No extra configuration is required beyond the `R2_BUCKET` binding.
+
+### Object tools
+
+| Tool | Type | Effect |
+|---|---|---|
+| `r2_object_list` | read | Lists objects and delimited prefixes under the configured root prefix |
+| `r2_object_head` | read | Returns object metadata without returning the body |
+| `r2_object_get` | read | Returns UTF-8 text for text-like objects, bounded by `MAX_INLINE_TEXT_BYTES` |
+| `r2_object_put` | write | Writes UTF-8 text to one object; supports conditional overwrite via `expectedEtag` |
+| `r2_object_put_if_absent` | write | Creates a text object only when the key does not already exist |
+| `r2_object_delete` | destructive | Deletes one object; requires `confirm: true` |
+| `r2_object_delete_many` | destructive | Deletes multiple objects; requires `confirm: true`, supports `dryRun` |
+| `r2_object_copy` | write | Copies one object by read plus write; not atomic |
+| `r2_object_move` | destructive | Copies then deletes source; not atomic; requires `confirm: true`, supports `dryRun` |
+| `r2_object_rename` | destructive | Moves an object to a new basename; not atomic; requires `confirm: true`, supports `dryRun` |
+
+### Transfer tools
+
+| Tool | Type | Effect |
+|---|---|---|
+| `r2_upload_base64` | write | Uploads a base64-encoded payload to one R2 object |
+| `r2_download_base64` | read | Returns object bytes as base64 plus metadata, bounded by `MAX_TRANSFER_BYTES` |
+
+## Enabling optional tools
+
+### Cloudflare API admin tools
+
+Set `ENABLE_ACCOUNT_TOOLS=true` in your Worker environment to register the 10 read-only admin tools. These tools call the Cloudflare REST API and require `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to be present.
+
+```
+ENABLE_ACCOUNT_TOOLS=true
+CLOUDFLARE_ACCOUNT_ID=<your-account-id>
+CLOUDFLARE_API_TOKEN=<token-with-r2-read-permissions>
+```
+
+No account-level create, update, or delete operations are included in this surface.
+
+### S3-compatible presign tools
+
+Set `ENABLE_PRESIGN_TOOLS=true` to register `r2_presign_get` and `r2_presign_put`. These tools generate time-limited signed URLs against R2's S3-compatible endpoint and require S3-compatible credentials.
+
+```
+ENABLE_PRESIGN_TOOLS=true
+R2_ACCESS_KEY_ID=<your-r2-access-key-id>
+R2_SECRET_ACCESS_KEY=<your-r2-secret-access-key>
+```
+
+The endpoint defaults to `https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com`. Override it with `R2_S3_ENDPOINT` if needed. The region defaults to `auto` and can be overridden with `R2_S3_REGION`.
+
+## Object key scoping with R2_ROOT_PREFIX
+
+When `R2_ROOT_PREFIX` is set, all object tools scope keys under that prefix transparently. A tool call using key `notes/example.txt` maps to the actual R2 key `<R2_ROOT_PREFIX>/notes/example.txt` in the bucket. Responses always return keys in their relative (un-prefixed) form, so callers never need to be aware of the prefix.
+
+```
+R2_ROOT_PREFIX=project-a/data
+```
+
+With this configuration, `r2_object_list` with `prefix: "notes/"` will list only objects under `project-a/data/notes/` in the underlying bucket.
+
+## Tool annotations
+
+Every tool declares MCP annotations that describe its side-effect profile to MCP clients.
+
+| Annotation | Meaning |
+|---|---|
+| `readOnlyHint: true` | The tool never modifies R2 state |
+| `destructiveHint: true` | The tool may permanently delete data |
+| `idempotentHint: true` | Calling the tool multiple times with the same inputs produces the same result |
+
+Clients and orchestrators may use these hints to present additional confirmation prompts or to restrict which tools are permitted in automated pipelines.
+
+## Explore by surface
+
+<CardGroup cols={2}>
+  <Card title="Object Tools" href="/tools/object-tools">
+    All 10 CRUD tools for listing, reading, writing, copying, moving, and deleting objects.
+  </Card>
+  <Card title="Transfer Tools" href="/tools/transfer-tools">
+    Base64 upload and download tools for binary objects bounded by `MAX_TRANSFER_BYTES`.
+  </Card>
+  <Card title="Presign Tools" href="/tools/presign-tools">
+    Generate time-limited GET and PUT signed URLs via the S3-compatible API.
+  </Card>
+  <Card title="Admin Tools" href="/tools/admin-tools">
+    Read-only Cloudflare API tools for bucket metadata, CORS, lifecycle, domains, and metrics.
+  </Card>
+</CardGroup>

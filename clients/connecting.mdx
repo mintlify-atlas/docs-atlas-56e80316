@@ -1,0 +1,105 @@
+---
+title: "Connect Any MCP Client to the Cloudflare R2 Worker"
+sidebarTitle: "Connecting"
+description: "Configure any MCP-compatible client to reach the deployed R2 Worker endpoint, complete GitHub OAuth, and verify tools are registered."
+---
+
+Any MCP client that supports remote MCP over streamable HTTP can connect to this Worker. When `AUTH_MODE=github` is set, the Worker acts as a full OAuth 2.0 authorization server and requires a GitHub login before granting access to the tool endpoint. When `AUTH_MODE=none` is set — typically for local development — the endpoint is open and requires no credentials at all.
+
+## Endpoint Reference
+
+The MCP endpoint depends on where the Worker is running and how `AUTH_MODE` is configured.
+
+**Remote (deployed Worker):**
+
+```text
+https://<worker-url>/mcp
+```
+
+**Local development (`AUTH_MODE=none`):**
+
+```text
+http://localhost:8787/mcp
+```
+
+When `AUTH_MODE=github` is active, the Worker exposes four OAuth routes that MCP clients and browsers interact with during the login flow:
+
+```text
+/authorize
+/token
+/register
+/callback
+```
+
+The browser login step must use a GitHub account that appears in the `ALLOWED_GITHUB_LOGINS` environment variable. Any other GitHub account will authenticate successfully but will be denied access.
+
+## Generic Client Configuration
+
+Use the following values when configuring any MCP-compatible client. The exact field names vary by client, but the concepts are the same.
+
+**Remote with GitHub OAuth:**
+
+```text
+endpoint = https://<worker-url>/mcp
+auth     = OAuth
+```
+
+**Local with no auth:**
+
+```text
+endpoint = http://localhost:8787/mcp
+auth     = none
+```
+
+<Note>
+  `tools/list` confirms that:
+  - The client successfully reached `/mcp`
+  - Authentication completed (when `AUTH_MODE=github`)
+  - The Worker registered its tools without error
+
+  It does **not** prove that every tool can reach the R2 bucket. A successful `tools/list` with a misconfigured or unbound bucket will still return tool names — the failure only surfaces when a tool is invoked. Use `/healthz` to verify bucket accessibility independently.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="401 or OAuth failure during login">
+    A `401` response or an OAuth error during the authorization flow usually points to a misconfigured auth setup. Check each of the following:
+
+    - Confirm `AUTH_MODE=github` is set in your Wrangler config or environment.
+    - Verify the GitHub OAuth App's **Authorization callback URL** is set to `https://<worker-url>/callback` — an exact match is required.
+    - Confirm `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are stored as Worker secrets (not plain-text vars).
+    - Confirm `COOKIE_ENCRYPTION_KEY` is set as a Worker secret.
+    - Confirm the `OAUTH_KV` KV namespace binding exists in your Wrangler config and is bound to the Worker.
+  </Accordion>
+
+  <Accordion title="Login succeeds but access is denied">
+    If the GitHub login completes without error but the client still receives an access-denied response, the authenticated GitHub login is not listed in `ALLOWED_GITHUB_LOGINS`.
+
+    - Open your Wrangler config and check the value of `ALLOWED_GITHUB_LOGINS`.
+    - The value is a comma-separated list of GitHub usernames (e.g. `alice,bob`).
+    - Add the GitHub username to the list, then redeploy the Worker.
+  </Accordion>
+
+  <Accordion title="No tools visible after connecting">
+    If the client connects without error but `tools/list` returns an empty set, work through these checks in order:
+
+    - Confirm the client is pointed at `/mcp` and not at `/healthz` or any other route.
+    - Refresh tool or action definitions inside the client — most clients cache the tool list.
+    - Confirm the Worker deployed successfully by checking the Cloudflare dashboard or running `wrangler tail`.
+    - Open `/healthz` in a browser or with `curl` to verify the bucket is accessible. A `503` response from `/healthz` means the bucket binding is broken, which can also prevent tool registration in some configurations.
+  </Accordion>
+</AccordionGroup>
+
+## Client Guides
+
+<CardGroup cols={2}>
+  <Card title="ChatGPT" icon="message-bot" href="/clients/chatgpt">
+    Step-by-step instructions for adding this Worker as a custom ChatGPT connector with OAuth.
+  </Card>
+  <Card title="MCP Inspector" icon="magnifying-glass" href="/clients/mcp-inspector">
+    Use the official MCP Inspector to browse and invoke tools interactively against the Worker.
+  </Card>
+</CardGroup>
+
+For a deeper explanation of how GitHub OAuth, `AUTH_MODE`, and `ALLOWED_GITHUB_LOGINS` interact, see the [Auth Overview](/auth/overview).

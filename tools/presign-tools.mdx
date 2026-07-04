@@ -1,0 +1,139 @@
+---
+title: "Presigned URL Tools for Direct R2 Access"
+sidebarTitle: "Presign Tools"
+description: "Enable optional presigned URL tools to generate temporary S3-compatible GET and PUT URLs, with required R2 credentials and key security considerations."
+---
+
+Presigned URL tools generate temporary, S3-compatible URLs that let clients upload and download objects directly to and from R2 — without routing any data through the Worker itself. Because the Worker never touches the object bytes, these tools are the correct approach for large files, browser-initiated transfers, and any scenario where Worker memory limits would otherwise be a bottleneck. Both tools are **disabled by default** and require separate R2 S3 API credentials in addition to the standard Worker R2 binding.
+
+See [Tools Overview](/tools/overview) for the full tool surface and [Deployment Configuration](/deployment/configuration) for environment variable reference.
+
+## Enabling Presign Tools
+
+Set `ENABLE_PRESIGN_TOOLS` to `"true"` in the `vars` block of your `wrangler.jsonc`:
+
+```jsonc
+"vars": {
+  "ENABLE_PRESIGN_TOOLS": "true"
+}
+```
+
+Then store the R2 S3 credentials as Wrangler secrets so they are never written to disk:
+
+```sh
+npx wrangler secret put R2_ACCESS_KEY_ID -c wrangler.jsonc
+npx wrangler secret put R2_SECRET_ACCESS_KEY -c wrangler.jsonc
+```
+
+### Required and optional variables
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `R2_BUCKET_NAME` | Yes | — | Name of the target R2 bucket |
+| `R2_ACCESS_KEY_ID` | Yes | — | R2 S3 API access key ID (secret) |
+| `R2_SECRET_ACCESS_KEY` | Yes | — | R2 S3 API secret access key (secret) |
+| `R2_S3_REGION` | No | `"auto"` | S3 region string sent to the S3 client |
+| `R2_S3_ENDPOINT` | No | Derived from `CLOUDFLARE_ACCOUNT_ID` | Full S3 endpoint URL; auto-constructed as `https://<account-id>.r2.cloudflarestorage.com` when `CLOUDFLARE_ACCOUNT_ID` is set |
+
+<Note>
+`R2_S3_ENDPOINT` is derived automatically if `CLOUDFLARE_ACCOUNT_ID` is present. You only need to set it explicitly when using a custom endpoint or when `CLOUDFLARE_ACCOUNT_ID` is not configured.
+</Note>
+
+## When to Use Presigned URLs
+
+Presigned URLs are the right tool in three situations:
+
+- **Large files** — objects that exceed `MAX_TRANSFER_BYTES` (default 1 MiB) cannot be transferred inline through the Worker. A presigned URL bypasses that limit entirely because the client streams directly to R2.
+- **Avoiding Worker memory pressure** — even when a file fits within `MAX_TRANSFER_BYTES`, routing binary data through the Worker consumes memory and CPU. Use presigned URLs for images, archives, and other binary payloads.
+- **Browser upload and download flows** — frontend applications can receive a presigned PUT URL from the MCP client and upload directly from the browser without any server-side relay.
+
+---
+
+## Tool Reference
+
+### r2_presign_get
+
+Creates a temporary presigned GET URL for a single R2 object. The returned URL can be used by any HTTP client to download the object directly from R2 until the URL expires. No Worker involvement is required for the actual download.
+
+<ParamField body="key" type="string" required>
+  The object key to generate a download URL for. If `R2_ROOT_PREFIX` is configured, the key is resolved relative to that prefix.
+</ParamField>
+
+<ParamField body="expiresInSeconds" type="integer">
+  How long the URL remains valid, in seconds. Must be between `1` and `604800` (7 days). Defaults to `3600` (1 hour) when omitted.
+</ParamField>
+
+**Response:** A JSON object containing the resolved `key`, the `url` string, and the effective `expiresInSeconds` value.
+
+**Example call:**
+
+```json
+{
+  "key": "large/archive.zip",
+  "expiresInSeconds": 900
+}
+```
+
+---
+
+### r2_presign_put
+
+Creates a temporary presigned PUT URL for a single R2 object. Clients can use the URL to upload an object directly to R2 with a standard HTTP `PUT` request. The Worker is not involved in the upload itself.
+
+<ParamField body="key" type="string" required>
+  The object key to generate an upload URL for. Resolved relative to `R2_ROOT_PREFIX` if configured.
+</ParamField>
+
+<ParamField body="contentType" type="string">
+  Optional MIME type to set on the object. When provided, the `Content-Type` header is embedded in the signed URL and the uploading client must send a matching `Content-Type` header.
+</ParamField>
+
+<ParamField body="expiresInSeconds" type="integer">
+  How long the URL remains valid, in seconds. Must be between `1` and `604800` (7 days). Defaults to `3600` (1 hour) when omitted.
+</ParamField>
+
+**Response:** A JSON object containing the resolved `key`, the `url` string, the effective `expiresInSeconds` value, and `contentType` if it was specified.
+
+**Example call:**
+
+```json
+{
+  "key": "uploads/archive.zip",
+  "contentType": "application/zip",
+  "expiresInSeconds": 900
+}
+```
+
+---
+
+## Security Considerations
+
+<Warning>
+Presigned URLs bypass Worker-level authentication entirely. Anyone who possesses a valid presigned URL can read or write the targeted object until the URL expires — no MCP session or Worker auth check is involved at download/upload time.
+</Warning>
+
+Keep the following practices in mind when using presigned tools:
+
+- **Treat presigned URLs as bearer credentials.** A leaked URL grants full access to the target operation for its entire lifetime. Revocation is not possible once the URL is issued.
+- **Use short expirations.** The 15-minute example (`900` seconds) is a reasonable upper bound for most use cases. The maximum of `604800` seconds (7 days) should be reserved for exceptional circumstances only.
+- **Do not log presigned URLs.** Avoid writing them to application logs, analytics pipelines, or request tracing systems where they may persist long after the intended expiry.
+- **Do not include presigned URLs in shared chat transcripts.** If the MCP session is shared or replayed, any presigned URL embedded in the conversation becomes accessible to all participants. Only include URLs in conversations you fully trust and control.
+- **Scope uploads tightly.** If your workflow only requires downloads, keep `r2_presign_put` flows out of the conversation entirely to reduce the blast radius of a credential leak.
+
+---
+
+## R2 S3 Credentials
+
+R2 S3 access keys are **separate from the Worker R2 binding**. The `R2_BUCKET` binding in `wrangler.jsonc` grants the Worker ambient access to R2 through Cloudflare's internal system. Presigned URL generation requires a distinct set of S3-compatible credentials that authorize the S3 signing operation.
+
+To create R2 S3 credentials:
+
+1. Open the [Cloudflare Dashboard](https://dash.cloudflare.com) and navigate to **R2 Object Storage**.
+2. Select **Manage R2 API Tokens**.
+3. Create a new API token with the minimum permissions required — **Object Read** for `r2_presign_get` only, or **Object Read & Write** if you also use `r2_presign_put`.
+4. Copy the **Access Key ID** and **Secret Access Key** immediately; the secret is not shown again.
+5. Store both values as Wrangler secrets using the commands in [Enabling Presign Tools](#enabling-presign-tools) above.
+
+<Tip>
+Create separate R2 API tokens for each deployed Worker rather than sharing a single token across environments. This makes rotation and revocation straightforward if a secret is ever exposed.
+</Tip>

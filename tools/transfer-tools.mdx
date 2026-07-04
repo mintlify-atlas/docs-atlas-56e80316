@@ -1,0 +1,133 @@
+---
+title: "Base64 Transfer Tools for R2 Binary Objects"
+sidebarTitle: "Transfer Tools"
+description: "Two always-enabled MCP tools — r2_upload_base64 and r2_download_base64 — transfer binary R2 objects as base64, bounded by MAX_TRANSFER_BYTES."
+---
+
+The transfer tools handle objects that cannot be represented as UTF-8 text: images, compiled binaries, archives, PDFs, and any other binary content. Instead of returning raw bytes, they encode object bodies as base64 strings that travel safely through the MCP JSON transport layer. Both tools are always enabled alongside the object tools — no additional environment variables are required. All transfers are bounded by `MAX_TRANSFER_BYTES` (default 1 MB).
+
+## Choosing the right tool
+
+| Scenario | Recommended tool |
+|---|---|
+| Reading or writing JSON, YAML, plain text, Markdown, JS, or other text-like content within 256 KB | [`r2_object_get`](/tools/object-tools) / [`r2_object_put`](/tools/object-tools) |
+| Reading or writing binary objects (images, archives, etc.) within 1 MB | `r2_download_base64` / `r2_upload_base64` |
+| Transferring objects larger than `MAX_TRANSFER_BYTES`, or sharing objects with external clients | [Presigned URL tools](/tools/presign-tools) |
+
+<Tip>
+  Use `r2_object_head` to check an object's `size` and `contentType` before choosing which tool to call.
+</Tip>
+
+---
+
+## r2_upload_base64
+
+Upload a base64-encoded payload into one R2 object. The base64 string is decoded to raw bytes before writing, so the stored object is a binary file — not a base64-encoded file. Optionally supply `expectedEtag` to perform a conditional overwrite.
+
+<ParamField query="key" type="string" required>
+  The relative object key to write.
+</ParamField>
+
+<ParamField query="contentBase64" type="string" required>
+  Standard base64-encoded content to upload. The encoded string length must not exceed `ceil(MAX_TRANSFER_BYTES / 3) * 4` characters (≈ 1,398,104 characters for the default 1 MB limit).
+</ParamField>
+
+<ParamField query="contentType" type="string">
+  MIME type to store as the object's `Content-Type` header. Optional. Recommended for binary objects to ensure correct serving behavior.
+</ParamField>
+
+<ParamField query="customMetadata" type="object">
+  Key-value string pairs stored as custom metadata on the object. Optional.
+</ParamField>
+
+<ParamField query="expectedEtag" type="string">
+  When supplied, the write succeeds only if the stored object has this ETag. Use for optimistic concurrency. Optional.
+</ParamField>
+
+```json
+{
+  "key": "images/logo.png",
+  "contentBase64": "iVBORw0KGgoAAAANSUhEUgAAAAUA...",
+  "contentType": "image/png",
+  "customMetadata": { "source": "design-v3" }
+}
+```
+
+<Note>
+  The tool validates base64 string length before decoding. If `contentBase64` is longer than `ceil(MAX_TRANSFER_BYTES / 3) * 4` characters, a 413 error is returned immediately without attempting to decode. A second check is performed on the decoded byte length to catch edge cases with padding.
+</Note>
+
+---
+
+## r2_download_base64
+
+Return one R2 object as a base64-encoded string along with its metadata. The object size is checked against `MAX_TRANSFER_BYTES` before downloading — objects exceeding the limit return a 413 error without fetching the body. Use a [presigned GET URL](/tools/presign-tools) to retrieve objects larger than the limit.
+
+<ParamField query="key" type="string" required>
+  The relative object key to download.
+</ParamField>
+
+**Response fields:**
+
+<ResponseField name="contentBase64" type="string">
+  The object body encoded as standard base64.
+</ResponseField>
+
+<ResponseField name="contentType" type="string | null">
+  The MIME type stored on the object, or `null` if none was set.
+</ResponseField>
+
+<ResponseField name="etag" type="string">
+  The ETag of the stored object. Pass this as `expectedEtag` to a subsequent upload to implement compare-and-swap.
+</ResponseField>
+
+<ResponseField name="filename" type="string">
+  The basename of the object key (the final path segment after the last `/`).
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  The relative object key, without the `R2_ROOT_PREFIX` if one is configured.
+</ResponseField>
+
+<ResponseField name="lastModified" type="string | null">
+  ISO 8601 timestamp of when the object was last written, or `null` if unavailable.
+</ResponseField>
+
+<ResponseField name="size" type="integer">
+  Object size in bytes.
+</ResponseField>
+
+```json
+{
+  "key": "images/logo.png"
+}
+```
+
+Example response shape:
+
+```json
+{
+  "contentBase64": "iVBORw0KGgoAAAANSUhEUgAAAAUA...",
+  "contentType": "image/png",
+  "etag": "\"abc123def456\"",
+  "filename": "logo.png",
+  "key": "images/logo.png",
+  "lastModified": "2024-06-01T12:00:00.000Z",
+  "size": 4821
+}
+```
+
+<Note>
+  The size check against `MAX_TRANSFER_BYTES` is performed using object metadata before any bytes are fetched. If the object is too large, the tool returns a 413 error immediately. To retrieve large objects, use [`r2_presign_get`](/tools/presign-tools) to generate a temporary download URL.
+</Note>
+
+---
+
+## Size limits reference
+
+| Config variable | Default | Applies to |
+|---|---|---|
+| `MAX_TRANSFER_BYTES` | 1,048,576 (1 MB) | `r2_upload_base64`, `r2_download_base64` |
+| `MAX_INLINE_TEXT_BYTES` | 262,144 (256 KB) | `r2_object_get` |
+
+Both limits are configurable via Worker environment variables. For objects exceeding `MAX_TRANSFER_BYTES`, use the [presigned URL tools](/tools/presign-tools) to upload or download directly between the client and R2 without routing bytes through the Worker.

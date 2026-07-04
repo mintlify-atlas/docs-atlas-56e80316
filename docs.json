@@ -1,72 +1,86 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "Cloudflare R2 Remote MCP Worker",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
-  },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "primary": "#F6821F",
+    "light": "#FDE68A",
+    "dark": "#C05621"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/XxYouDeaDPunKxX/cloudflare-r2-remote-mcp-worker"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/XxYouDeaDPunKxX/cloudflare-r2-remote-mcp-worker"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/deploy",
+              "deployment/configuration",
+              "deployment/verify"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "auth/overview",
+              "auth/github-oauth",
+              "auth/security"
+            ]
+          },
+          {
+            "group": "Client Setup",
+            "pages": [
+              "clients/connecting",
+              "clients/chatgpt",
+              "clients/mcp-inspector"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tools Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "tools/overview"
+            ]
+          },
+          {
+            "group": "Object Tools",
+            "pages": [
+              "tools/object-tools",
+              "tools/transfer-tools"
+            ]
+          },
+          {
+            "group": "Optional Tools",
+            "pages": [
+              "tools/presign-tools",
+              "tools/admin-tools"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

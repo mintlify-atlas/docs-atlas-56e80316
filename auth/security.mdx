@@ -1,0 +1,148 @@
+---
+title: "Security Model and Hardening Guide"
+sidebarTitle: "Security"
+description: "Threat model, auth mode risks, root prefix scoping, destructive operation guards, presigned URL handling, and the public deployment checklist."
+---
+
+The Worker exposes R2 object storage capabilities to authenticated MCP clients over the internet. Every enabled tool — reads, writes, deletes, listings, and presigned URL generation — is callable by any client that holds a valid session token. The security model is layered: GitHub OAuth determines who can obtain a token, `R2_ROOT_PREFIX` limits which keys tools can touch, runtime guards protect destructive operations, and payload limits bound the size of inline transfers. This page covers each layer and what happens when any of them is weakened or misconfigured.
+
+## Auth mode risk
+
+The `AUTH_MODE` variable is the outermost access control boundary.
+
+| Mode | Risk |
+|------|------|
+| `github` | Access is limited to GitHub logins explicitly listed in `ALLOWED_GITHUB_LOGINS`. An empty allowlist denies all logins. |
+| `none` | Any client that can reach `/mcp` can invoke all enabled tools. The R2 bucket binding is effectively public through MCP. |
+
+<Warning>
+  Do not deploy `AUTH_MODE=none` on a public URL. If a public tunnel or a `*.workers.dev` subdomain is reachable without authentication, every R2 tool — including destructive operations — is exposed to any HTTP client that discovers the URL.
+</Warning>
+
+## Root prefix scoping
+
+Setting `R2_ROOT_PREFIX` in `wrangler.jsonc` restricts all object tools to a logical subtree of the bucket. Tool calls that specify a key are resolved relative to the prefix, and the Worker prepends the prefix before any R2 API call.
+
+```jsonc
+"vars": {
+  "R2_ROOT_PREFIX": "projects/example"
+}
+```
+
+With this configuration, a tool call for key `readme.md` resolves to `projects/example/readme.md` in R2. Attempts to escape the subtree are rejected by the path normalization layer.
+
+The server rejects the following path patterns at the normalization step:
+
+| Pattern | Example | Rejection reason |
+|---------|---------|-----------------|
+| Absolute paths | `/etc/passwd` | Leading `/` not allowed |
+| Drive-letter paths | `C:\data\file.txt` | Windows-style roots not allowed |
+| `.` segments | `a/./b` | Current-directory reference not allowed |
+| `..` segments | `a/../b` | Parent-directory traversal not allowed |
+| Null bytes | `file\0.txt` | Null bytes in path not allowed |
+
+If `R2_ROOT_PREFIX` is not set, tools operate on the full bucket namespace. Set a prefix on any deployment where MCP clients should not be able to read or write every key in the bucket.
+
+## Destructive operation guards
+
+Delete, delete-many, move, and rename operations are irreversible. The Worker enforces two runtime guards to reduce accidental or malicious data loss.
+
+**Confirmation required.** Every destructive tool requires the caller to pass `confirm: true` explicitly. A call that omits or sets `confirm: false` is rejected before any R2 API call is made.
+
+**Dry run available.** Batch operations — delete-many, move, and rename — support `dryRun: true`. A dry-run call validates inputs and reports what would be changed without modifying any objects. Use dry run to preview the scope of a bulk operation before committing.
+
+Account administration tools are read-only by design. Bucket creation and deletion, CORS mutation, lifecycle mutation, custom domain mutation, and notification mutation are not implemented. Account tools cannot make changes to bucket configuration.
+
+## Presigned URL risks
+
+Presigned URLs grant temporary, direct HTTP access to a single object operation — no Worker authentication is required to use them. Treat every presigned URL as a bearer credential.
+
+<Tip>
+  Use presigned URLs for large file transfers instead of inline MCP payloads. They offload bandwidth from the Worker and avoid hitting `MAX_TRANSFER_BYTES`.
+</Tip>
+
+Recommended handling:
+
+- **Short expirations.** Set the shortest expiry that is practical for the intended use. A URL that expires in minutes limits the window of exposure if it leaks.
+- **No shared logs.** Do not log presigned URLs to shared systems. Any log entry containing a URL grants access to whoever can read the log until expiry.
+- **No untrusted chat transcripts.** Do not paste presigned URLs into chat sessions that are not trusted end-to-end. The URL is the credential — sharing it is sharing access.
+- **Prefer presigned for large payloads.** Worker-mediated transfers are bounded by `MAX_TRANSFER_BYTES`. For objects larger than that limit, generate a presigned URL instead of reading or writing through the Worker.
+
+Presign tools are disabled by default (`ENABLE_PRESIGN_TOOLS=false`). Enable them only when direct upload or download URLs are genuinely needed.
+
+## Cloudflare API token
+
+Read-only account administration tools require `CLOUDFLARE_API_TOKEN`. Use the narrowest R2 read scope the deployment needs — do not use a global API token. A global token can read, write, and delete across all services in your Cloudflare account.
+
+Set the token as a Wrangler secret:
+
+```sh
+npx wrangler secret put CLOUDFLARE_API_TOKEN -c wrangler.jsonc
+```
+
+Account tools are disabled by default (`ENABLE_ACCOUNT_TOOLS=false`). Enable them only when read-only account-level visibility is required.
+
+## Payload limits
+
+Inline MCP transfers are bounded by two configuration values:
+
+| Variable | Default | Applies to |
+|----------|---------|-----------|
+| `MAX_INLINE_TEXT_BYTES` | 262 144 (256 KiB) | Text object reads returned inline in the MCP response |
+| `MAX_TRANSFER_BYTES` | 1 048 576 (1 MiB) | Base64 binary reads and Worker-mediated object copies |
+
+Objects larger than these limits must be transferred using presigned URLs. Both limits can be raised in `wrangler.jsonc` vars, but increasing them raises the maximum memory and bandwidth a single tool call can consume in a Worker invocation.
+
+## Secrets that must never be committed
+
+The following values must not appear in any file committed to version control:
+
+- `.dev.vars` — local development environment file containing secrets
+- `wrangler.jsonc` — may contain API tokens or S3 keys if edited carelessly
+- `CLOUDFLARE_API_TOKEN` — Cloudflare account API token
+- `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` — GitHub OAuth App credentials
+- `COOKIE_ENCRYPTION_KEY` — HMAC key used to sign session cookies
+- `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` — R2 S3-compatible credentials for presigned URLs
+- Any presigned URLs themselves — treat as short-lived bearer tokens
+
+Deploy all sensitive credentials with Wrangler secrets:
+
+```sh
+npx wrangler secret put CLOUDFLARE_API_TOKEN -c wrangler.jsonc
+npx wrangler secret put GITHUB_CLIENT_ID -c wrangler.jsonc
+npx wrangler secret put GITHUB_CLIENT_SECRET -c wrangler.jsonc
+npx wrangler secret put COOKIE_ENCRYPTION_KEY -c wrangler.jsonc
+npx wrangler secret put R2_ACCESS_KEY_ID -c wrangler.jsonc
+npx wrangler secret put R2_SECRET_ACCESS_KEY -c wrangler.jsonc
+```
+
+<Tip>
+  Generate `COOKIE_ENCRYPTION_KEY` with `openssl rand -base64 32`. This produces a 256-bit random value encoded as a 44-character base64 string — sufficient entropy for HMAC-SHA-256 cookie signing.
+</Tip>
+
+## Public deployment checklist
+
+Before exposing `/mcp` to the internet, verify every item:
+
+- [ ] `AUTH_MODE=github` is set in `wrangler.jsonc` vars
+- [ ] `ALLOWED_GITHUB_LOGINS` is non-empty and contains only intended users
+- [ ] `OAUTH_KV` namespace is created and the binding is present in `wrangler.jsonc`
+- [ ] The GitHub OAuth App callback URL matches the deployed Worker URL exactly (`https://<worker-url>/callback`)
+- [ ] `GITHUB_CLIENT_ID` is set as a Wrangler secret
+- [ ] `GITHUB_CLIENT_SECRET` is set as a Wrangler secret
+- [ ] `COOKIE_ENCRYPTION_KEY` is set as a Wrangler secret (generated with `openssl rand -base64 32`)
+- [ ] `wrangler.jsonc` is listed in `.gitignore` and not committed to version control
+- [ ] `.dev.vars` is listed in `.gitignore` and not committed to version control
+- [ ] Account tools remain disabled (`ENABLE_ACCOUNT_TOOLS` unset or `false`) unless read-only account visibility is required
+- [ ] Presign tools remain disabled (`ENABLE_PRESIGN_TOOLS` unset or `false`) unless direct upload/download URLs are required
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Authentication Overview" href="/auth/overview">
+    OAuth flow, auth modes, and allowlist semantics.
+  </Card>
+  <Card title="GitHub OAuth Setup" href="/auth/github-oauth">
+    Step-by-step OAuth App creation, KV namespace provisioning, and secrets.
+  </Card>
+</CardGroup>

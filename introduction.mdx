@@ -1,0 +1,107 @@
+---
+title: "Cloudflare R2 Remote MCP Worker: Object Storage for AI"
+sidebarTitle: "Introduction"
+description: "A remote MCP server that exposes Cloudflare R2 object storage operations to AI clients like ChatGPT, secured with GitHub OAuth and running on Cloudflare Workers."
+---
+
+The Cloudflare R2 Remote MCP Worker turns a Cloudflare Worker into a remote [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server, giving AI clients direct, authenticated access to R2 object storage. Instead of manually uploading files or scripting API calls, you can ask an MCP-capable client—such as ChatGPT with a custom connector—to list, read, upload, copy, or delete objects in your R2 bucket. The Worker handles GitHub OAuth, routes MCP traffic, and enforces configurable safety guards, so your storage is accessible to AI tools without being left open to the public internet.
+
+## Architecture overview
+
+Every request flows through a short chain before touching R2:
+
+```text
+MCP client (e.g. ChatGPT)
+  → GitHub OAuth  (/authorize → /callback → /token)
+  → Cloudflare Worker  (/mcp)
+  → R2 bucket  (via Worker binding)
+```
+
+The OAuth layer is provided by `@cloudflare/workers-oauth-provider`. When `AUTH_MODE=github` (the default), every MCP connection must complete a GitHub OAuth flow and the authenticated login must appear in `ALLOWED_GITHUB_LOGINS`. The Worker then forwards the MCP session to the server defined in `src/server.ts`, which registers tools against the single bound R2 bucket.
+
+<Note>
+  GitHub OAuth here verifies **who is connecting**—it does not grant any access to GitHub repositories. It is purely an identity gate.
+</Note>
+
+## Credential surfaces
+
+Three separate credential surfaces control what operations are available. Only the Worker R2 binding is required; the other two unlock optional tool groups.
+
+| Surface | Used for | Credential |
+|---|---|---|
+| **Worker R2 binding** | Object list, head, get, put, delete, copy, move, rename on the bound bucket | Cloudflare Worker R2 binding (set in `wrangler.jsonc`) |
+| **Cloudflare API** | Optional read-only bucket and account visibility tools | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` |
+| **S3-compatible API** | Optional presigned GET/PUT URL generation | `R2_ACCESS_KEY_ID` + `R2_SECRET_ACCESS_KEY` |
+
+## What is exposed
+
+The Worker exposes object-level access to one bound R2 bucket. The default tool set covers everyday object operations:
+
+- **Object tools** — list, head, get, put, delete, copy, move, rename
+- **Transfer tools** — base64 upload and download for binary-safe inline transfers over MCP
+
+Two optional tool groups can be enabled via environment variables:
+
+- **Account/admin tools** (`ENABLE_ACCOUNT_TOOLS=true`) — read-only visibility into bucket metadata and account configuration via the Cloudflare API
+- **Presigned URL tools** (`ENABLE_PRESIGN_TOOLS=true`) — generate time-limited presigned GET and PUT URLs using R2 S3-compatible credentials
+
+## What is intentionally not exposed
+
+This project is not a full Cloudflare R2 account administration interface. The following mutating account-level operations are **not** available as MCP tools and are not planned:
+
+- Bucket creation or deletion
+- CORS rule updates
+- Lifecycle policy updates
+- Custom domain changes
+- Event notification changes
+
+This scope boundary is intentional. Restricting the Worker to object-level operations limits blast radius if a session is ever misused.
+
+## Security defaults
+
+The Worker ships with conservative defaults that you must explicitly relax:
+
+| Setting | Default | Override |
+|---|---|---|
+| `AUTH_MODE` | `github` (OAuth required) | Set to `none` for local dev only |
+| `ENABLE_ACCOUNT_TOOLS` | `false` | Set to `true` to enable read-only account tools |
+| `ENABLE_PRESIGN_TOOLS` | `false` | Set to `true` to enable presigned URL tools |
+| Destructive object tools | Require `confirm: true` in the tool call | Cannot be disabled |
+| Batch delete / move / rename | Support `dryRun: true` | — |
+| `R2_ROOT_PREFIX` | `""` (full bucket access) | Set a prefix to restrict all operations to a subtree |
+
+<Warning>
+  Never set `AUTH_MODE=none` on a public-facing Worker URL unless another access control layer (such as a Cloudflare Access policy) protects the endpoint. Without auth, any MCP client that can reach the URL has full object access.
+</Warning>
+
+## Worker endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /healthz` | Returns `ok: true` plus runtime config values when the bucket is reachable. Returns `503` if the R2 binding is inaccessible. |
+| `* /mcp` | The MCP endpoint consumed by AI clients. Routes through OAuth when `AUTH_MODE=github`. |
+| `GET /authorize` | Starts the GitHub OAuth authorization flow. |
+| `GET /callback` | GitHub OAuth redirect target; exchanges the code for a session. |
+| `POST /token` | OAuth token endpoint used by MCP clients after the OAuth flow completes. |
+| `POST /register` | OAuth client registration endpoint. |
+
+<Tip>
+  Hit `/healthz` immediately after deploying or changing configuration. The response includes `authMode`, `accountToolsEnabled`, `presignToolsEnabled`, `bucketAccessible`, and active size limits—everything you need to confirm the Worker booted with the right settings.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Deploy the Worker and connect your first AI client in minutes.
+  </Card>
+  <Card title="Full deployment guide" icon="cloud" href="/deployment/deploy">
+    Step-by-step production deployment with all configuration options.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/auth/overview">
+    Understand GitHub OAuth setup, allowed logins, and auth modes.
+  </Card>
+  <Card title="Tools reference" icon="wrench" href="/tools/overview">
+    Complete reference for all MCP tools exposed by the Worker.
+  </Card>
+</CardGroup>

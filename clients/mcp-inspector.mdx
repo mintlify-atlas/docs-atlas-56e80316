@@ -1,0 +1,143 @@
+---
+title: "Interactively Test R2 MCP Tools with the MCP Inspector"
+sidebarTitle: "MCP Inspector"
+description: "Use the MCP Inspector to connect to the R2 Worker endpoint, walk through GitHub OAuth, browse the tool list, and invoke tools directly."
+---
+
+MCP Inspector is the standard browser-based tool for testing MCP servers. It connects to any MCP endpoint over streamable HTTP, walks through the OAuth flow when authentication is required, and presents the full tool list with a UI for invoking each tool and inspecting its response. It is the fastest way to confirm that your Worker is deployed correctly, that authentication is working, and that the expected R2 tools are registered.
+
+## Run MCP Inspector
+
+MCP Inspector requires Node.js. Start it with `npx` — no installation needed:
+
+```sh
+npx @modelcontextprotocol/inspector@latest
+```
+
+This opens the Inspector UI in your browser at `http://localhost:5173` (or the next available port).
+
+## Connect to the Worker
+
+In the Inspector's connection panel, enter your Worker's MCP endpoint and click **Connect**.
+
+**Remote (deployed Worker):**
+
+```text
+https://<worker-url>/mcp
+```
+
+**Local development (`AUTH_MODE=none`):**
+
+```text
+http://localhost:8787/mcp
+```
+
+### With `AUTH_MODE=github`
+
+When the Worker requires GitHub OAuth, the Inspector triggers the authorization flow automatically:
+
+1. A browser tab opens and redirects to the Worker's `/authorize` endpoint.
+2. You are forwarded to GitHub to approve the OAuth App.
+3. After approval, GitHub redirects to the Worker's `/callback` endpoint.
+4. The Worker validates the login against `ALLOWED_GITHUB_LOGINS` and issues a token.
+5. The Inspector receives the token and completes the connection.
+6. `tools/list` is now available.
+
+The GitHub account used in step 2 must appear in `ALLOWED_GITHUB_LOGINS`. Any other account will be rejected after the GitHub login step.
+
+### With `AUTH_MODE=none` (local)
+
+Connect directly — no browser popup or login is required. The Inspector sends requests to `http://localhost:8787/mcp` and receives the tool list immediately.
+
+## Expected Tools After Connecting
+
+Once connected, click **List Tools** (or the equivalent) in the Inspector. With default feature flags, the following twelve tools should appear:
+
+```text
+r2_download_base64
+r2_object_copy
+r2_object_delete
+r2_object_delete_many
+r2_object_get
+r2_object_head
+r2_object_list
+r2_object_move
+r2_object_put
+r2_object_put_if_absent
+r2_object_rename
+r2_upload_base64
+```
+
+Additional tools appear when optional feature flags are enabled:
+
+- With `ENABLE_ACCOUNT_TOOLS=true` — read-only admin tools are also registered.
+- With `ENABLE_PRESIGN_TOOLS=true` — presign tools are also registered.
+
+<Note>
+  A successful `tools/list` response confirms that the MCP endpoint is reachable and that tools are registered. It does **not** prove that the R2 bucket is accessible. If you want to verify bucket connectivity, open `/healthz` in a browser or run `curl https://<worker-url>/healthz`. A healthy response looks like:
+
+  ```json
+  {
+    "ok": true,
+    "bucketAccessible": true
+  }
+  ```
+
+  A `503` from `/healthz` means the bucket binding is broken — the MCP tools will return errors when invoked even though `tools/list` succeeded.
+</Note>
+
+## SDK-Based Smoke Test
+
+For automated or scripted verification in local development (`AUTH_MODE=none`), you can run a tools/list check directly using the MCP TypeScript SDK. This is the same check used by the project's own smoke-test suite.
+
+Start the local Worker:
+
+```sh
+npm run dev
+```
+
+Then run the following Node.js snippet:
+
+```js
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const client = new Client({ name: "r2-mcp-verify", version: "0.0.0" });
+const transport = new StreamableHTTPClientTransport(new URL("http://127.0.0.1:8787/mcp"));
+await client.connect(transport);
+const tools = await client.listTools();
+console.log(JSON.stringify(tools.tools.map((tool) => tool.name).sort(), null, 2));
+await client.close();
+```
+
+<Tip>
+  You can run the snippet without creating a file by piping it to Node.js:
+
+  ```sh
+  node --input-type=module <<'EOF'
+  import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+  import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+  const client = new Client({ name: "r2-mcp-verify", version: "0.0.0" });
+  const transport = new StreamableHTTPClientTransport(new URL("http://127.0.0.1:8787/mcp"));
+  await client.connect(transport);
+  const tools = await client.listTools();
+  console.log(JSON.stringify(tools.tools.map((tool) => tool.name).sort(), null, 2));
+  await client.close();
+  EOF
+  ```
+</Tip>
+
+The output is a sorted JSON array of tool names. A passing result includes at minimum:
+
+```text
+r2_download_base64
+r2_object_get
+r2_object_list
+r2_object_put
+```
+
+## Related Pages
+
+- [Full verification guide](/deployment/verify) — covers static type checks, health checks, and the complete smoke-test workflow.
+- [Tools overview](/tools/overview) — descriptions, parameters, and usage notes for every tool exposed by the Worker.
